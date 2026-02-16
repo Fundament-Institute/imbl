@@ -159,6 +159,7 @@ where
     }
 
     fn remove(&mut self, k: &K) -> Option<V> {
+        #[expect(clippy::if_same_then_else)]
         if self.remove_mut(k) {
             None // rpds doesn't return the removed value
         } else {

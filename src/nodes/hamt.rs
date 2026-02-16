@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use std::borrow::Borrow;
 use std::cell::UnsafeCell;
 use std::hash::{BuildHasher, Hash};
 use std::iter::FusedIterator;
@@ -12,6 +11,7 @@ use std::{fmt, mem, ptr};
 
 use archery::{SharedPointer, SharedPointerKind};
 use bitmaps::{Bits, BitsImpl};
+use equivalent::Equivalent;
 use imbl_sized_chunks::inline_array::InlineArray;
 use imbl_sized_chunks::sparse_chunk::{Iter as ChunkIter, IterMut as ChunkIterMut, SparseChunk};
 
@@ -204,10 +204,9 @@ where
     BitsImpl<WIDTH>: Bits,
 {
     #[inline]
-    pub(crate) fn get<BK>(&self, hash: HashBits, key: &BK) -> Option<&A>
+    pub(crate) fn get<Q>(&self, hash: HashBits, key: &Q) -> Option<&A>
     where
-        BK: Eq + ?Sized,
-        A::Key: Borrow<BK>,
+        Q: Equivalent<A::Key> + ?Sized,
     {
         let (search, group) = Self::ctrl_hash_and_group(hash);
         let mut bitmap = group_find(&self.control[group], search);
@@ -215,7 +214,7 @@ where
         while let Some(offset) = bitmap.first_index() {
             let index = group * GROUP_WIDTH + offset;
             let (ref value, value_hash) = self.data.get(index).unwrap();
-            if hash_may_eq::<A>(hash, *value_hash) && key == value.extract_key().borrow() {
+            if hash_may_eq::<A>(hash, *value_hash) && key.equivalent(value.extract_key()) {
                 return Some(value);
             }
             bitmap.set(offset, false);
@@ -223,10 +222,9 @@ where
         None
     }
 
-    pub(crate) fn get_mut<BK>(&mut self, hash: HashBits, key: &BK) -> Option<&mut A>
+    pub(crate) fn get_mut<Q>(&mut self, hash: HashBits, key: &Q) -> Option<&mut A>
     where
-        BK: Eq + ?Sized,
-        A::Key: Borrow<BK>,
+        Q: Equivalent<A::Key> + ?Sized,
     {
         let (search, group) = Self::ctrl_hash_and_group(hash);
         let mut bitmap = group_find(&self.control[group], search);
@@ -239,7 +237,7 @@ where
             #[allow(unsafe_code)]
             let this = unsafe { &mut *this };
             let (ref mut value, value_hash) = this.data.get_mut(index).unwrap();
-            if hash_may_eq::<A>(hash, *value_hash) && key == value.extract_key().borrow() {
+            if hash_may_eq::<A>(hash, *value_hash) && key.equivalent(value.extract_key()) {
                 return Some(value);
             }
             bitmap.set(offset, false);
@@ -247,10 +245,9 @@ where
         None
     }
 
-    pub(crate) fn remove<BK>(&mut self, hash: HashBits, key: &BK) -> Option<A>
+    pub(crate) fn remove<Q>(&mut self, hash: HashBits, key: &Q) -> Option<A>
     where
-        BK: Eq + ?Sized,
-        A::Key: Borrow<BK>,
+        Q: Equivalent<A::Key> + ?Sized,
     {
         let (search, group) = Self::ctrl_hash_and_group(hash);
         let mut bitmap = group_find(&self.control[group], search);
@@ -258,7 +255,7 @@ where
         while let Some(offset) = bitmap.first_index() {
             let index = group * GROUP_WIDTH + offset;
             let (ref value, value_hash) = self.data.get(index).unwrap();
-            if hash_may_eq::<A>(hash, *value_hash) && key == value.extract_key().borrow() {
+            if hash_may_eq::<A>(hash, *value_hash) && key.equivalent(value.extract_key()) {
                 let mut ctrl_array = self.control[group].to_array();
                 ctrl_array[offset] = 0;
                 self.control[group] = SimdGroup::from(ctrl_array);
@@ -399,10 +396,9 @@ impl<A: HashValue> LargeSimdNode<A> {
 }
 
 impl<A: HashValue, P: SharedPointerKind> HamtNode<A, P> {
-    pub(crate) fn get<BK>(&self, hash: HashBits, shift: usize, key: &BK) -> Option<&A>
+    pub(crate) fn get<Q>(&self, hash: HashBits, shift: usize, key: &Q) -> Option<&A>
     where
-        BK: Eq + ?Sized,
-        A::Key: Borrow<BK>,
+        Q: Equivalent<A::Key> + ?Sized,
     {
         let mut node = self;
         let mut shift = shift;
@@ -425,7 +421,7 @@ impl<A: HashValue, P: SharedPointerKind> HamtNode<A, P> {
                 }
                 Entry::Value(ref value, value_hash) => {
                     return if hash_may_eq::<A>(hash, *value_hash)
-                        && key == value.extract_key().borrow()
+                        && key.equivalent(value.extract_key())
                     {
                         Some(value)
                     } else {
@@ -442,10 +438,9 @@ impl<A: HashValue, P: SharedPointerKind> HamtNode<A, P> {
 
     #[cold]
     #[inline(always)]
-    fn get_terminal<'a, BK>(entry: &'a Entry<A, P>, hash: HashBits, key: &BK) -> Option<&'a A>
+    fn get_terminal<'a, Q>(entry: &'a Entry<A, P>, hash: HashBits, key: &Q) -> Option<&'a A>
     where
-        BK: Eq + ?Sized,
-        A::Key: Borrow<BK>,
+        Q: Equivalent<A::Key> + ?Sized,
     {
         match entry {
             Entry::SmallSimdNode(ref small) => small.get(hash, key),
@@ -455,11 +450,10 @@ impl<A: HashValue, P: SharedPointerKind> HamtNode<A, P> {
         }
     }
 
-    pub(crate) fn get_mut<BK>(&mut self, hash: HashBits, shift: usize, key: &BK) -> Option<&mut A>
+    pub(crate) fn get_mut<Q>(&mut self, hash: HashBits, shift: usize, key: &Q) -> Option<&mut A>
     where
         A: Clone,
-        BK: Eq + ?Sized,
-        A::Key: Borrow<BK>,
+        Q: Equivalent<A::Key> + ?Sized,
     {
         let index = Self::mask(hash, shift) as usize;
         match self.data.get_mut(index) {
@@ -473,7 +467,7 @@ impl<A: HashValue, P: SharedPointerKind> HamtNode<A, P> {
                 SharedPointer::make_mut(large_ref).get_mut(hash, key)
             }
             Some(Entry::Value(ref mut value, value_hash)) => {
-                if hash_may_eq::<A>(hash, *value_hash) && key == value.extract_key().borrow() {
+                if hash_may_eq::<A>(hash, *value_hash) && key.equivalent(value.extract_key()) {
                     Some(value)
                 } else {
                     None
@@ -567,11 +561,10 @@ impl<A: HashValue, P: SharedPointerKind> HamtNode<A, P> {
         None
     }
 
-    pub(crate) fn remove<BK>(&mut self, hash: HashBits, shift: usize, key: &BK) -> Option<A>
+    pub(crate) fn remove<Q>(&mut self, hash: HashBits, shift: usize, key: &Q) -> Option<A>
     where
         A: Clone,
-        BK: Eq + ?Sized,
-        A::Key: Borrow<BK>,
+        Q: Equivalent<A::Key> + ?Sized,
     {
         let index = Self::mask(hash, shift) as usize;
         let removed;
@@ -596,7 +589,7 @@ impl<A: HashValue, P: SharedPointerKind> HamtNode<A, P> {
                 (large.len() == 1).then(|| large.pop_value())
             }
             Entry::Value(value, value_hash) => {
-                if hash_may_eq::<A>(hash, *value_hash) && key == value.extract_key().borrow() {
+                if hash_may_eq::<A>(hash, *value_hash) && key.equivalent(value.extract_key()) {
                     return self.data.remove(index).map(Entry::unwrap_value);
                 } else {
                     return None;
@@ -683,25 +676,23 @@ impl<A: HashValue> CollisionNode<A> {
     }
 
     #[cold]
-    fn get<BK>(&self, key: &BK) -> Option<&A>
+    fn get<Q>(&self, key: &Q) -> Option<&A>
     where
-        BK: Eq + ?Sized,
-        A::Key: Borrow<BK>,
+        Q: Equivalent<A::Key> + ?Sized,
     {
         self.data
             .iter()
-            .find(|&entry| key == entry.extract_key().borrow())
+            .find(|&entry| key.equivalent(entry.extract_key()))
     }
 
     #[cold]
-    fn get_mut<BK>(&mut self, key: &BK) -> Option<&mut A>
+    fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut A>
     where
-        BK: Eq + ?Sized,
-        A::Key: Borrow<BK>,
+        Q: Equivalent<A::Key> + ?Sized,
     {
         self.data
             .iter_mut()
-            .find(|entry| key == entry.extract_key().borrow())
+            .find(|entry| key.equivalent(entry.extract_key()))
     }
 
     #[cold]
@@ -716,13 +707,12 @@ impl<A: HashValue> CollisionNode<A> {
     }
 
     #[cold]
-    fn remove<BK>(&mut self, key: &BK) -> Option<A>
+    fn remove<Q>(&mut self, key: &Q) -> Option<A>
     where
-        BK: Eq + ?Sized,
-        A::Key: Borrow<BK>,
+        Q: Equivalent<A::Key> + ?Sized,
     {
         for (index, item) in self.data.iter().enumerate() {
-            if key == item.extract_key().borrow() {
+            if key.equivalent(item.extract_key()) {
                 return Some(self.data.swap_remove(index));
             }
         }

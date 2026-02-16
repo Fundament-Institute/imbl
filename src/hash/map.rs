@@ -31,6 +31,7 @@ use std::mem;
 use std::ops::{Add, Index, IndexMut};
 
 use archery::{SharedPointer, SharedPointerKind};
+use equivalent::Equivalent;
 
 use crate::nodes::hamt::{
     hash_key, Drain as NodeDrain, HashBits, HashValue, Iter as NodeIter, IterMut as NodeIterMut,
@@ -520,10 +521,9 @@ where
     /// );
     /// ```
     #[must_use]
-    pub fn get<BK>(&self, key: &BK) -> Option<&V>
+    pub fn get<Q>(&self, key: &Q) -> Option<&V>
     where
-        BK: Hash + Eq + ?Sized,
-        K: Borrow<BK>,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         if let Some(root) = &self.root {
             root.get(hash_key(&self.hasher, key), 0, key)
@@ -549,10 +549,9 @@ where
     /// );
     /// ```
     #[must_use]
-    pub fn get_key_value<BK>(&self, key: &BK) -> Option<(&K, &V)>
+    pub fn get_key_value<Q>(&self, key: &Q) -> Option<(&K, &V)>
     where
-        BK: Hash + Eq + ?Sized,
-        K: Borrow<BK>,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         if let Some(root) = &self.root {
             root.get(hash_key(&self.hasher, key), 0, key)
@@ -581,10 +580,9 @@ where
     /// ```
     #[inline]
     #[must_use]
-    pub fn contains_key<BK>(&self, k: &BK) -> bool
+    pub fn contains_key<Q>(&self, k: &Q) -> bool
     where
-        BK: Hash + Eq + ?Sized,
-        K: Borrow<BK>,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         self.get(k).is_some()
     }
@@ -722,10 +720,9 @@ where
     /// );
     /// ```
     #[must_use]
-    pub fn get_mut<BK>(&mut self, key: &BK) -> Option<&mut V>
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
     where
-        BK: Hash + Eq + ?Sized,
-        K: Borrow<BK>,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         self.get_key_value_mut(key).map(|(_, v)| v)
     }
@@ -746,14 +743,11 @@ where
     /// );
     /// ```
     #[must_use]
-    pub fn get_key_value_mut<BK>(&mut self, key: &BK) -> Option<(&K, &mut V)>
+    pub fn get_key_value_mut<Q>(&mut self, key: &Q) -> Option<(&K, &mut V)>
     where
-        BK: Hash + Eq + ?Sized,
-        K: Borrow<BK>,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
-        let Some(root) = self.root.as_mut() else {
-            return None;
-        };
+        let root = self.root.as_mut()?;
         match SharedPointer::make_mut(root).get_mut(hash_key(&self.hasher, key), 0, key) {
             None => None,
             Some((key, value)) => Some((key, value)),
@@ -811,10 +805,9 @@ where
     /// assert_eq!(None, map.remove(&789));
     /// assert!(map.is_empty());
     /// ```
-    pub fn remove<BK>(&mut self, k: &BK) -> Option<V>
+    pub fn remove<Q>(&mut self, k: &Q) -> Option<V>
     where
-        BK: Hash + Eq + ?Sized,
-        K: Borrow<BK>,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         self.remove_with_key(k).map(|(_, v)| v)
     }
@@ -835,10 +828,9 @@ where
     /// assert_eq!(None, map.remove_with_key(&789));
     /// assert!(map.is_empty());
     /// ```
-    pub fn remove_with_key<BK>(&mut self, k: &BK) -> Option<(K, V)>
+    pub fn remove_with_key<Q>(&mut self, k: &Q) -> Option<(K, V)>
     where
-        BK: Hash + Eq + ?Sized,
-        K: Borrow<BK>,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let Some(root) = &mut self.root else {
             return None;
@@ -1001,10 +993,9 @@ where
     ///
     /// Time: O(log n)
     #[must_use]
-    pub fn without<BK>(&self, k: &BK) -> Self
+    pub fn without<Q>(&self, k: &Q) -> Self
     where
-        BK: Hash + Eq + ?Sized,
-        K: Borrow<BK>,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         match self.extract_with_key(k) {
             None => self.clone(),
@@ -1052,10 +1043,9 @@ where
     ///
     /// Time: O(log n)
     #[must_use]
-    pub fn extract<BK>(&self, k: &BK) -> Option<(V, Self)>
+    pub fn extract<Q>(&self, k: &Q) -> Option<(V, Self)>
     where
-        BK: Hash + Eq + ?Sized,
-        K: Borrow<BK>,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         self.extract_with_key(k).map(|(_, v, m)| (v, m))
     }
@@ -1065,10 +1055,9 @@ where
     ///
     /// Time: O(log n)
     #[must_use]
-    pub fn extract_with_key<BK>(&self, k: &BK) -> Option<(K, V, Self)>
+    pub fn extract_with_key<Q>(&self, k: &Q) -> Option<(K, V, Self)>
     where
-        BK: Hash + Eq + ?Sized,
-        K: Borrow<BK>,
+        Q: Hash + Equivalent<K> + ?Sized,
     {
         let mut out = self.clone();
         out.remove_with_key(k).map(|(k, v)| (k, v, out))
@@ -1852,16 +1841,16 @@ where
     }
 }
 
-impl<BK, K, V, S, P> Index<&BK> for GenericHashMap<K, V, S, P>
+impl<Q, K, V, S, P> Index<&Q> for GenericHashMap<K, V, S, P>
 where
-    BK: Hash + Eq + ?Sized,
-    K: Hash + Eq + Borrow<BK>,
+    Q: Hash + Equivalent<K> + ?Sized,
+    K: Hash + Eq,
     S: BuildHasher + Clone,
     P: SharedPointerKind,
 {
     type Output = V;
 
-    fn index(&self, key: &BK) -> &Self::Output {
+    fn index(&self, key: &Q) -> &Self::Output {
         match self.get(key) {
             None => panic!("HashMap::index: invalid key"),
             Some(value) => value,
@@ -1869,15 +1858,15 @@ where
     }
 }
 
-impl<BK, K, V, S, P> IndexMut<&BK> for GenericHashMap<K, V, S, P>
+impl<Q, K, V, S, P> IndexMut<&Q> for GenericHashMap<K, V, S, P>
 where
-    BK: Hash + Eq + ?Sized,
-    K: Hash + Eq + Clone + Borrow<BK>,
+    Q: Hash + Equivalent<K> + ?Sized,
+    K: Hash + Eq + Clone,
     V: Clone,
     S: BuildHasher + Clone,
     P: SharedPointerKind,
 {
-    fn index_mut(&mut self, key: &BK) -> &mut Self::Output {
+    fn index_mut(&mut self, key: &Q) -> &mut Self::Output {
         match self.get_mut(key) {
             None => panic!("HashMap::index_mut: invalid key"),
             Some(value) => value,
@@ -2112,9 +2101,9 @@ impl<K, V, S, P: SharedPointerKind> AsRef<GenericHashMap<K, V, S, P>>
 impl<K, V, OK, OV, SA, SB, P1, P2> From<&GenericHashMap<&K, &V, SA, P1>>
     for GenericHashMap<OK, OV, SB, P2>
 where
-    K: Hash + Eq + ToOwned<Owned = OK> + ?Sized,
+    K: Hash + Equivalent<OK> + ToOwned<Owned = OK> + ?Sized,
     V: ToOwned<Owned = OV> + ?Sized,
-    OK: Hash + Eq + Clone + Borrow<K>,
+    OK: Hash + Eq + Clone,
     OV: Borrow<V> + Clone,
     SA: BuildHasher + Clone,
     SB: BuildHasher + Default + Clone,
